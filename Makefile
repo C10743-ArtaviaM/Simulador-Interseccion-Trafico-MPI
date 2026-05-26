@@ -1,5 +1,5 @@
 CC			= mpicc
-CFLAGS	= -Wall -Wextra -std=c11 -02
+CFLAGS	= -Wall -Wextra -std=c11 -O2
 
 all: interseccion_mpi
 
