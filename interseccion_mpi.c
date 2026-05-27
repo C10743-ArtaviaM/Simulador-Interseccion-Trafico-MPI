@@ -174,11 +174,9 @@ void ciclo_coordinador(int cantidad_vehiculos) {
 int main(int argc, char** argv) {
   int rango;  // 0
   int cantidad_procesos;
-
-  int cantidad_vehiculos = 10;
+  int cantidad_vehiculos = N_VEHICULOS;
 
   MPI_Init(&argc, &argv);
-
   MPI_Comm_rank(MPI_COMM_WORLD, &rango);
   MPI_Comm_size(MPI_COMM_WORLD, &cantidad_procesos);
 
@@ -186,7 +184,16 @@ int main(int argc, char** argv) {
 
   estructura_fase1(rango, cantidad_vehiculos);
 
-  MPI_Finalize();
+  /* R2.4 - Todos se sincronizan antes de iniciar la simulacion */
+  MPI_Barrier(MPI_COMM_WORLD);
 
+  if (rango == 0) {
+    ciclo_coordinador(cantidad_vehiculos);
+  } else {
+    srand(rango * 137); /* Da una semilla distinta por carril */
+    ciclo_carril(rango, cantidad_vehiculos);
+  }
+
+  MPI_Finalize();
   return 0;
 }
