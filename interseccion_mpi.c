@@ -8,6 +8,8 @@
  * Mauricio Artavia Monge
  * Daniel Rodriguez Ruiz
  */
+#define _POSIX_C_SOURCE 200809L
+
 #include "interseccion_mpi.h"
 
 const char* NOMBRE_CARRIL[N_CARRILES] = {"Norte", "Sur", "Este", "Oeste"};
@@ -71,6 +73,7 @@ void ciclo_carril(int rango, int cantidad_vehiculos) {
     int respuesta;
     MPI_Recv(&respuesta, 1, MPI_INT, 0, TAG_PERMISO, MPI_COMM_WORLD,
              MPI_STATUS_IGNORE);
+    espera_acumulada += MPI_Wtime() - t_inicio_espera;
 
     /* R2.1d - Simulamos cruce */
     usleep(2000 + rand() % 4000);
@@ -95,75 +98,73 @@ void ciclo_coordinador(int cantidad_vehiculos) {
   int cola[N_CARRILES * 100];
   int cola_inicio = 0;
   int cola_fin = 0;
+  double esperas[N_CARRILES];
+  int esperas_recibidas = 0;
 
   int cruce_ocupado = 0;
   int terminados = 0; /* Son los carriles que enviaron id = -1 */
   int total_esperados = N_CARRILES * cantidad_vehiculos;
   int total_cruzados = 0;
 
-  while (terminados < N_CARRILES) {
-    MPI_Status estado;
-    int id_recibido;
-
+  while (terminados < N_CARRILES || total_cruzados < total_esperados ||
+         cruce_ocupado || cola_inicio < cola_fin ||
+         esperas_recibidas < N_CARRILES) {
     /* R2.2b - Recibimos del primero que llegue */
-    MPI_Recv(&id_recibido, 1, MPI_INT, MPI_ANY_SOURCE, MPI_ANY_TAG,
-             MPI_COMM_WORLD, &estado);
-
+    MPI_Status estado;
+    MPI_Probe(MPI_ANY_SOURCE, MPI_ANY_TAG, MPI_COMM_WORLD, &estado);
     int origen = estado.MPI_SOURCE;
     int tag = estado.MPI_TAG;
 
-    if (tag == TAG_SOLICITUD) {
-      if (id_recibido == -1) {
-        /* R2.5 - Carril ha terminado */
-        terminados++;
-        continue;
-      }
+    if (tag == TAG_ESTADISTICA) {
+      double espera;
 
-      if (!cruce_ocupado) {
-        /* Cruce esta libre, se da permiso de inmediato */
+      MPI_Recv(&espera, 1, MPI_DOUBLE, origen, TAG_ESTADISTICA, MPI_COMM_WORLD,
+               MPI_STATUS_IGNORE);
+      esperas[esperas_recibidas++] = espera;
+    } else if (tag == TAG_SOLICITUD) {
+      int id_recibido;
+
+      MPI_Recv(&id_recibido, 1, MPI_INT, origen, TAG_SOLICITUD, MPI_COMM_WORLD,
+               MPI_STATUS_IGNORE);
+
+      if (id_recibido == -1) {
+        /* R2.5 - Carril ha logrado terminar */
+        terminados++;
+      } else if (!cruce_ocupado) {
+        /* Tenemos el cruce libre, damos permiso inmediato */
         int permiso = 1;
+
         MPI_Send(&permiso, 1, MPI_INT, origen, TAG_PERMISO, MPI_COMM_WORLD);
         cruce_ocupado = 1;
-        printf("[Coordinador] ✓ %d autorizado. Cruce OCUPADO.", origen);
+        printf("[Coordinador] ✓ %d autorizado. Cruce OCUPADO.\n", origen);
       } else {
-        /* Cruce esta ocupado, encolamos */
+        /* Tenemos cruce ocupado */
         cola[cola_fin++] = origen;
         printf("[Coordinador] %d en cola (%d esperando).\n", origen,
                cola_fin - cola_inicio);
       }
     } else if (tag == TAG_CRUCE_FIN) {
-      /* R2.2d - El vehiculo ha terminado de cruzar */
+      int id_recibido;
+      MPI_Recv(&id_recibido, 1, MPI_INT, origen, TAG_CRUCE_FIN, MPI_COMM_WORLD,
+               MPI_STATUS_IGNORE);
+
+      /* R2.2d - Vehiculo ha terminado de cruzar */
       total_cruzados++;
 
       if (cola_inicio < cola_fin) {
-        /* Hay alguien en cola: se atiende */
+        /* Tenemos a alguien por atender en cola */
         int siguiente = cola[cola_inicio++];
         int permiso = 1;
+
         MPI_Send(&permiso, 1, MPI_INT, siguiente, TAG_PERMISO, MPI_COMM_WORLD);
-        printf("[Coordinador] ✓ %d autorizado (siguiente en cola)");
+        printf("[Coordinador] ✓ %d autorizado (siguiente en cola)\n",
+               siguiente);
       } else {
-        /* Tenemos cola vacia: El cruce esta libre */
+        /* Tenemos cola vacia, hay cruce libre */
         cruce_ocupado = 0;
-        printf("Coordinador] Cruce LIBRE. (%d/%d cruzados)", total_cruzados,
+        printf("[Coordinador] Cruce LIBRE. (%d/%d cruzados)\n", total_cruzados,
                total_esperados);
       }
-    }
-  }
-
-  /* Drenamos la cola restante - Procesamos los TAG_CRUCE_FIN pendientes */
-  while (cola_inicio < cola_fin || cruce_ocupado) {
-    MPI_Status estado;
-    int id_recibido;
-    MPI_Recv(&id_recibido, 1, MPI_INT, MPI_ANY_SOURCE, TAG_CRUCE_FIN,
-             MPI_COMM_WORLD, &estado);
-    total_cruzados++;
-    cruce_ocupado = 0;
-
-    if (cola_inicio < cola_fin) {
-      int siguiente = cola[cola_inicio++];
-      int permiso = 1;
-      MPI_Send(&permiso, 1, MPI_INT, siguiente, TAG_PERMISO, MPI_COMM_WORLD);
-      cruce_ocupado = 1;
     }
   }
 

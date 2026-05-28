@@ -1,9 +1,10 @@
-
 #ifndef INTERSECCION_MPI_H
 #define INTERSECCION_MPI_H
 
 #include <mpi.h>
 #include <stdio.h>
+#include <stdlib.h>
+#include <unistd.h>
 
 // Tags de carril
 #define TAG_SOLICITUD 1   /* carril coordinador: pido cruzar */
